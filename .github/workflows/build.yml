@@ -8,12 +8,26 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    
+
     steps:
       - name: 📥 Checkout Code
         uses: actions/checkout@v4
 
-      - name: 🧹 Free Disk Space First
+      - name: ☕ Setup Java 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 🔧 Setup Java Environment Variables (echo to GITHUB_ENV)
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME" >> $GITHUB_ENV
+          echo "PATH=$JAVA_HOME/bin:$PATH" >> $GITHUB_ENV
+          echo "Java version (setup step):"
+          java -version || true
+          javac -version || true
+
+      - name: 🧹 Free Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /opt/ghc
@@ -21,26 +35,9 @@ jobs:
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
           df -h
 
-      - name: ☕ Install OpenJDK 17
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y openjdk-17-jdk
-          echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
-          echo "/usr/lib/jvm/java-17-openjdk-amd64/bin" >> $GITHUB_PATH
-
-      - name: 🔍 Verify Java
-        run: |
-          export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-          export PATH=$JAVA_HOME/bin:$PATH
-          echo "=== Java Verification ==="
-          which java
-          which javac
-          java -version
-          javac -version
-          echo "JAVA_HOME: $JAVA_HOME"
-
       - name: 📦 Install System Dependencies
         run: |
+          sudo apt-get update
           sudo apt-get install -y \
             python3-pip \
             build-essential \
@@ -63,7 +60,16 @@ jobs:
             autoconf \
             automake \
             libtool \
-            pkg-config
+            pkg-config \
+            openjdk-17-jdk-headless
+
+      - name: 🔧 Ensure JAVA_HOME points to apt-installed JDK (if present)
+        run: |
+          if [ -d "/usr/lib/jvm/java-17-openjdk-amd64" ]; then
+            echo "Using apt-installed OpenJDK at /usr/lib/jvm/java-17-openjdk-amd64"
+            echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
+            echo "PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH" >> $GITHUB_ENV
+          fi
 
       - name: 🔧 Install Python Build Tools
         run: |
@@ -81,22 +87,34 @@ jobs:
           rm -rf .buildozer
           rm -rf bin
 
-      - name: 🔨 Build APK with Correct Java
-        env:
-          JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+      - name: 📝 Create buildozer.spec if missing
         run: |
-          export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-          export PATH=$JAVA_HOME/bin:$PATH
-          
-          echo "=== Pre-Build Check ==="
+          if [ ! -f buildozer.spec ]; then
+            echo "Creating buildozer.spec..."
+            buildozer init
+          fi
+
+      - name: 🔎 Debug: show Java / Javac presence before build
+        run: |
           echo "JAVA_HOME: $JAVA_HOME"
-          echo "javac: $(which javac)"
-          javac -version
-          
-          echo "=== Starting Buildozer ==="
+          echo "PATH: $PATH"
+          which java || true
+          which javac || true
+          java -version || true
+          javac -version || true
+
+      - name: 🔨 Build APK with Environment Variables
+        env:
+          # ANDROID paths remain as in original; JAVA_HOME/PATH already set via GITHUB_ENV
+          ANDROID_SDK_ROOT: ${{ github.workspace }}/.buildozer/android/platform/android-sdk
+          ANDROID_NDK_ROOT: ${{ github.workspace }}/.buildozer/android/platform/android-ndk-r25b
+        run: |
+          echo "Building with JAVA_HOME: $JAVA_HOME"
+          echo "PATH: $PATH"
+          # الخيار yes هنا يجيب "y" على أي سؤال تفاعلي قد يطرأ؛ إن أردت ازالته فاحذفه
           yes | buildozer -v android debug
 
-      - name: 📤 Upload APK
+      - name: 📤 Upload APK Artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
@@ -109,7 +127,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-logs
-          path: |
-            .buildozer/
-            *.log
+          path: .buildozer/android/platform/build-*/
           retention-days: 7
