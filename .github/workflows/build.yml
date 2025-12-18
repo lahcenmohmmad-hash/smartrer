@@ -8,23 +8,24 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    
+    timeout-minutes: 120
+
     steps:
-      - name: 📥 Checkout Code
+      - name: 📥 Checkout code
         uses: actions/checkout@v4
 
-      - name: 🧹 Free Disk Space First
+      - name: 🧹 Free Disk Space (optional)
         run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /usr/local/share/boost
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/local/share/boost || true
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
           df -h
 
       - name: ☕ Install OpenJDK 17
         run: |
           sudo apt-get update
-          sudo apt-get install -y openjdk-17-jdk
+          sudo apt-get install -y openjdk-17-jdk-headless
           echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
           echo "/usr/lib/jvm/java-17-openjdk-amd64/bin" >> $GITHUB_PATH
 
@@ -33,14 +34,15 @@ jobs:
           export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
           export PATH=$JAVA_HOME/bin:$PATH
           echo "=== Java Verification ==="
-          which java
-          which javac
-          java -version
-          javac -version
+          which java || true
+          which javac || true
+          java -version || true
+          javac -version || true
           echo "JAVA_HOME: $JAVA_HOME"
 
-      - name: 📦 Install System Dependencies
+      - name: 📦 Install system dependencies
         run: |
+          sudo apt-get update
           sudo apt-get install -y \
             python3-pip \
             build-essential \
@@ -65,38 +67,64 @@ jobs:
             libtool \
             pkg-config
 
-      - name: 🔧 Install Python Build Tools
+      - name: 🔧 Install Python build tools
         run: |
           python3 -m pip install --upgrade pip
           pip3 install --upgrade setuptools wheel
           pip3 install --upgrade "cython<3.0.0"
 
-      - name: 🚀 Install Buildozer & P4A from Master
+      - name: 🚀 Install python-for-android and buildozer
         run: |
           pip3 install --upgrade git+https://github.com/kivy/python-for-android.git@master
           pip3 install --upgrade git+https://github.com/kivy/buildozer.git@master
 
-      - name: 🗑️ Clean Previous Build
+      - name: 🗑️ Clean previous build artifacts
         run: |
-          rm -rf .buildozer
-          rm -rf bin
+          rm -rf .buildozer || true
+          rm -rf bin || true
 
-      - name: 🔨 Build APK with Correct Java
+      - name: 🛠 Dedupe buildozer.spec (remove duplicate android.accept_sdk_license)
+        run: |
+          if [ -f buildozer.spec ]; then
+            echo "Checking for duplicates of android.accept_sdk_license..."
+            grep -n "android.accept_sdk_license" buildozer.spec || true
+            awk '
+              BEGIN{in_app=0; seen=0}
+              {
+                if ($0 ~ /^\[app\]/) { in_app=1; print; next }
+                if ($0 ~ /^\[/ && in_app==1) { in_app=0; print; next }
+                if (in_app==1 && $0 ~ /^[[:space:]]*android\.accept_sdk_license[[:space:]]*=/) {
+                  if (seen==0) { print; seen=1 } else { next }
+                } else { print }
+              }
+            ' buildozer.spec > buildozer.spec.new && mv buildozer.spec.new buildozer.spec
+            echo "After dedupe:"
+            grep -n "android.accept_sdk_license" buildozer.spec || true
+          else
+            echo "No buildozer.spec found!"
+          fi
+
+      - name: 🔨 Pre-build debug (show env)
+        run: |
+          export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+          export PATH=$JAVA_HOME/bin:$PATH
+          echo "JAVA_HOME: $JAVA_HOME"
+          echo "javac: $(which javac || true)"
+          javac -version || true
+          echo "python: $(which python3)"
+          python3 --version
+
+      - name: 🔨 Build APK (non-interactive)
         env:
           JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
         run: |
           export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
           export PATH=$JAVA_HOME/bin:$PATH
-          
-          echo "=== Pre-Build Check ==="
-          echo "JAVA_HOME: $JAVA_HOME"
-          echo "javac: $(which javac)"
-          javac -version
-          
-          echo "=== Starting Buildozer ==="
-          yes | buildozer -v android debug
+          echo "Starting buildozer..."
+          # لا تستخدم yes| إن أردت تجنب رسالة Broken pipe؛ لكن بعض الإصدارات تحتاج إجابة نعم تلقائياً
+          yes | buildozer -v android debug || (echo "Buildozer failed"; exit 1)
 
-      - name: 📤 Upload APK
+      - name: 📤 Upload APK artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
@@ -104,7 +132,7 @@ jobs:
           path: bin/*.apk
           retention-days: 30
 
-      - name: 📋 Upload Build Logs on Failure
+      - name: 📋 Upload build logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
