@@ -1,143 +1,69 @@
-name: Build SmartSRS Android App
+name: Build Android APK
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 120
+    timeout-minutes: 240
 
     steps:
-      - name: 📥 Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      - name: 🧹 Free Disk Space (optional)
-        run: |
-          sudo rm -rf /usr/share/dotnet || true
-          sudo rm -rf /opt/ghc || true
-          sudo rm -rf /usr/local/share/boost || true
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
-          df -h
+    - name: Free disk space
+      run: |
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /usr/local/share/boost
 
-      - name: ☕ Install OpenJDK 17
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y openjdk-17-jdk-headless
-          echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
-          echo "/usr/lib/jvm/java-17-openjdk-amd64/bin" >> $GITHUB_PATH
+    - name: Install OpenJDK 17
+      run: |
+        sudo apt update
+        sudo apt install -y openjdk-17-jdk
 
-      - name: 🔍 Verify Java
-        run: |
-          export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-          export PATH=$JAVA_HOME/bin:$PATH
-          echo "=== Java Verification ==="
-          which java || true
-          which javac || true
-          java -version || true
-          javac -version || true
-          echo "JAVA_HOME: $JAVA_HOME"
+    - name: Verify Java
+      run: java -version
 
-      - name: 📦 Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            python3-pip \
-            build-essential \
-            git \
-            python3-dev \
-            libsdl2-dev \
-            libsdl2-image-dev \
-            libsdl2-mixer-dev \
-            libsdl2-ttf-dev \
-            libportmidi-dev \
-            libswscale-dev \
-            libavformat-dev \
-            libavcodec-dev \
-            zlib1g-dev \
-            unzip \
-            zip \
-            libltdl-dev \
-            libffi-dev \
-            libssl-dev \
-            autoconf \
-            automake \
-            libtool \
-            pkg-config
+    - name: Install system dependencies
+      run: |
+        sudo apt install -y \
+          zip unzip git \
+          build-essential \
+          libssl-dev \
+          libffi-dev \
+          liblzma-dev \
+          libsqlite3-dev \
+          libncurses5 \
+          libncursesw5 \
+          zlib1g-dev
 
-      - name: 🔧 Install Python build tools
-        run: |
-          python3 -m pip install --upgrade pip
-          pip3 install --upgrade setuptools wheel
-          pip3 install --upgrade "cython<3.0.0"
+    - name: Install Python build tools
+      run: |
+        python3 -m pip install --upgrade pip
+        pip install --upgrade cython virtualenv
 
-      - name: 🚀 Install python-for-android and buildozer
-        run: |
-          pip3 install --upgrade git+https://github.com/kivy/python-for-android.git@master
-          pip3 install --upgrade git+https://github.com/kivy/buildozer.git@master
+    - name: Install python-for-android and buildozer
+      run: |
+        pip install buildozer==1.5.0 python-for-android==2024.01.21
 
-      - name: 🗑️ Clean previous build artifacts
-        run: |
-          rm -rf .buildozer || true
-          rm -rf bin || true
+    - name: Clean previous build
+      run: |
+        rm -rf .buildozer bin || true
 
-      - name: 🛠 Dedupe buildozer.spec (remove duplicate android.accept_sdk_license)
-        run: |
-          if [ -f buildozer.spec ]; then
-            echo "Checking for duplicates of android.accept_sdk_license..."
-            grep -n "android.accept_sdk_license" buildozer.spec || true
-            awk '
-              BEGIN{in_app=0; seen=0}
-              {
-                if ($0 ~ /^\[app\]/) { in_app=1; print; next }
-                if ($0 ~ /^\[/ && in_app==1) { in_app=0; print; next }
-                if (in_app==1 && $0 ~ /^[[:space:]]*android\.accept_sdk_license[[:space:]]*=/) {
-                  if (seen==0) { print; seen=1 } else { next }
-                } else { print }
-              }
-            ' buildozer.spec > buildozer.spec.new && mv buildozer.spec.new buildozer.spec
-            echo "After dedupe:"
-            grep -n "android.accept_sdk_license" buildozer.spec || true
-          else
-            echo "No buildozer.spec found!"
-          fi
+    - name: Build APK (non-interactive)
+      env:
+        JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+      run: |
+        export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+        export PATH=$JAVA_HOME/bin:$PATH
+        buildozer -v android debug
 
-      - name: 🔨 Pre-build debug (show env)
-        run: |
-          export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-          export PATH=$JAVA_HOME/bin:$PATH
-          echo "JAVA_HOME: $JAVA_HOME"
-          echo "javac: $(which javac || true)"
-          javac -version || true
-          echo "python: $(which python3)"
-          python3 --version
-
-      - name: 🔨 Build APK (non-interactive)
-        env:
-          JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
-        run: |
-          export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-          export PATH=$JAVA_HOME/bin:$PATH
-          echo "Starting buildozer..."
-          # لا تستخدم yes| إن أردت تجنب رسالة Broken pipe؛ لكن بعض الإصدارات تحتاج إجابة نعم تلقائياً
-          yes | buildozer -v android debug || (echo "Buildozer failed"; exit 1)
-
-      - name: 📤 Upload APK artifact
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: SmartSRS-APK
-          path: bin/*.apk
-          retention-days: 30
-
-      - name: 📋 Upload build logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: |
-            .buildozer/
-            *.log
-          retention-days: 7
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: apk
+        path: bin/*.apk
