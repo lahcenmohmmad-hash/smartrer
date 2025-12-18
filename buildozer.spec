@@ -59,6 +59,10 @@ android.gradle_dependencies = com.android.support:support-v4:28.0.0
 # تفعيل AndroidX
 android.enable_androidx = True
 
+# تخطي فحص Java (سيستخدم Java من النظام)
+android.skip_update = False
+android.accept_sdk_license = True
+
 [buildozer]
 
 # مستوى السجلات (2 = مفصل)
@@ -67,6 +71,4 @@ log_level = 2
 # تحذير عند التشغيل كـ root
 warn_on_root = 1
 
-# مسار SDK و NDK (اختياري - سيتم تحميلهم تلقائياً)
-# android.sdk_path = 
-# android.ndk_path =
+# ملاحظة: Buildozer سيستخدم Java من JAVA_HOME تلقائياً
