@@ -19,16 +19,6 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: 🔧 Setup Java Environment Variables
-        run: |
-          echo "JAVA_HOME=$JAVA_HOME" >> $GITHUB_ENV
-          echo "PATH=$JAVA_HOME/bin:$PATH" >> $GITHUB_ENV
-          echo "Java version:"
-          java -version
-          echo "Javac version:"
-          javac -version
-          echo "JAVA_HOME: $JAVA_HOME"
-
       - name: 🧹 Free Disk Space
         run: |
           sudo rm -rf /usr/share/dotnet
@@ -64,6 +54,16 @@ jobs:
             libtool \
             pkg-config
 
+      - name: 🔧 Verify Java Installation
+        run: |
+          echo "=== Java Information ==="
+          which java
+          which javac
+          java -version
+          javac -version
+          echo "JAVA_HOME: $JAVA_HOME"
+          ls -la $JAVA_HOME/bin/
+
       - name: 🔧 Install Python Build Tools
         run: |
           python3 -m pip install --upgrade pip
@@ -80,22 +80,33 @@ jobs:
           rm -rf .buildozer
           rm -rf bin
 
-      - name: 📝 Create buildozer.spec if missing
+      - name: 📝 Verify buildozer.spec exists
         run: |
           if [ ! -f buildozer.spec ]; then
-            echo "Creating buildozer.spec..."
-            buildozer init
+            echo "ERROR: buildozer.spec not found!"
+            exit 1
           fi
+          echo "buildozer.spec found ✓"
 
-      - name: 🔨 Build APK with Environment Variables
-        env:
-          JAVA_HOME: ${{ env.JAVA_HOME }}
-          ANDROID_SDK_ROOT: ${{ github.workspace }}/.buildozer/android/platform/android-sdk
-          ANDROID_NDK_ROOT: ${{ github.workspace }}/.buildozer/android/platform/android-ndk-r25b
+      - name: 🔨 Build APK
         run: |
-          echo "Building with JAVA_HOME: $JAVA_HOME"
+          export JAVA_HOME="${JAVA_HOME}"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          
+          echo "=== Environment Check ==="
+          echo "JAVA_HOME: $JAVA_HOME"
           echo "PATH: $PATH"
-          yes | buildozer -v android debug
+          echo "javac location: $(which javac)"
+          
+          echo "=== Starting Build ==="
+          yes | buildozer -v android debug || {
+            echo "=== Build Failed - Checking Logs ==="
+            if [ -d .buildozer/android/platform/build-* ]; then
+              echo "Build directory contents:"
+              ls -la .buildozer/android/platform/build-*/
+            fi
+            exit 1
+          }
 
       - name: 📤 Upload APK Artifact
         if: success()
@@ -110,5 +121,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-logs
-          path: .buildozer/android/platform/build-*/
+          path: |
+            .buildozer/
+            *.log
           retention-days: 7
